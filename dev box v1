@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""
+DevBox – Générateur d'environnements de dev prêts à l'emploi
+-----------------------------------------------------------
+Cet outil CLI génère une stack de projet complète (frontend, backend, db, auth, CI/CD) en un clic.
+Par exemple, pour la stack "Next.js + Node + MongoDB", il génère :
+  - Un répertoire "frontend" avec un projet Next.js
+  - Un répertoire "backend" avec un serveur Node.js
+  - Des Dockerfiles pour le frontend et le backend
+  - Un docker-compose.yml pour orchestrer frontend, backend et MongoDB
+  - Un workflow GitHub Actions (CI/CD)
+  - La possibilité d'activer des plugins (Stripe, Supabase, …)
+
+Auteur : ChatGPT
+Date   : 2025-04-16
+"""
+
+import os
+import argparse
+import shutil
+import sys
+
+# ---------------------------
+# Fonctions d'aide pour la création
+# ---------------------------
+def create_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+    print(f"Création du dossier : {path}")
+
+def write_file(path: str, content: str):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"Création du fichier : {path}")
+
+# ---------------------------
+# Templates pour la stack "Next.js + Node + MongoDB"
+# ---------------------------
+def get_frontend_package_json():
+    return '''{
+  "name": "frontend",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000"
+  },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"''' + plugins_dependencies("frontend") + '''
+  }
+}
+'''
+
+def get_frontend_index_js():
+    return '''function HomePage() {
+  return (
+    <div>
+      <h1>Bienvenue dans votre projet Next.js</h1>
+      <p>Ceci est votre page d'accueil générée automatiquement.</p>
+    </div>
+  );
+}
+
+export default HomePage;
+'''
+
+def get_frontend_next_config():
+    return '''/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+};
+
+module.exports = nextConfig;
+'''
+
+def get_backend_package_json():
+    return '''{
+  "name": "backend",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"''' + plugins_dependencies("backend") + '''
+  }
+}
+'''
+
+def get_backend_server_js():
+    return '''const express = require('express');
+const app = express();
+const port = 5000;
+
+app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.send('Bienvenue dans votre serveur Node.js généré automatiquement.');
+});
+
+app.listen(port, () => {
+  console.log(`Backend running on port ${port}`);
+});
+'''
+
+def get_dockerfile_frontend():
+    return '''# Dockerfile pour le frontend (Next.js)
+FROM node:16-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev"]
+'''
+
+def get_dockerfile_backend():
+    return '''# Dockerfile pour le backend (Node.js)
+FROM node:16-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+EXPOSE 5000
+CMD ["npm", "start"]
+'''
+
+def get_docker_compose():
+    return '''version: '3.8'
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongodb
+  mongodb:
+    image: mongo:latest
+    restart: always
+    ports:
+      - "27017:27017"
+'''
+
+def get_github_actions_ci():
+    return '''name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Build and push Docker images
+        run: |
+          docker-compose build
+          docker-compose up -d
+'''
+
+def plugins_dependencies(component: str) -> str:
+    """
+    Retourne une portion JSON représentant les dépendances supplémentaires
+    en fonction des plugins activés. Pour cet exemple, nous ajoutons Stripe pour
+    le backend et Supabase pour le frontend si activé.
+    Cette fonction consulte une variable globale PLUGINS définie par la CLI.
+    """
+    global PLUGINS
+    deps = ""
+    if component == "backend":
+        if "stripe" in PLUGINS:
+            deps += ',\n    "stripe": "^10.0.0"'
+    elif component == "frontend":
+        if "supabase" in PLUGINS:
+            deps += ',\n    "@supabase/supabase-js": "^2.0.0"'
+    return deps
+
+# ---------------------------
+# Générateur de projet DevBox
+# ---------------------------
+def generate_devbox(stack: str, output_dir: str, plugins: List[str]):
+    global PLUGINS
+    PLUGINS = [p.strip().lower() for p in plugins] if plugins else []
+    print(f"Stack demandée : {stack}")
+    print(f"Plugins activés : {PLUGINS}")
+    print(f"Création de la base du projet dans : {output_dir}")
+    
+    # Pour l'exemple, nous gérons uniquement le stack "nextjs-node-mongodb"
+    if stack != "nextjs-node-mongodb":
+        print("Stack non supportée actuellement. Seul 'nextjs-node-mongodb' est supporté.")
+        sys.exit(1)
+    
+    # Création de l'arborescence
+    create_dir(output_dir)
+    os.chdir(output_dir)
+    
+    # Création des dossiers principaux
+    create_dir("frontend")
+    create_dir("frontend/pages")
+    create_dir("backend")
+    create_dir(".github/workflows")
+    
+    # Frontend
+    write_file("frontend/package.json", get_frontend_package_json())
+    write_file("frontend/pages/index.js", get_frontend_index_js())
+    write_file("frontend/next.config.js", get_frontend_next_config())
+    write_file("frontend/Dockerfile.frontend", get_dockerfile_frontend())
+    
+    # Backend
+    write_file("backend/package.json", get_backend_package_json())
+    write_file("backend/server.js", get_backend_server_js())
+    write_file("backend/Dockerfile.backend", get_dockerfile_backend())
+    
+    # Docker Compose
+    write_file("docker-compose.yml", get_docker_compose())
+    
+    # GitHub Actions workflow
+    write_file(".github/workflows/ci.yml", get_github_actions_ci())
+    
+    print("Le projet DevBox a été généré avec succès !")
+
+# ---------------------------
+# Main – Interface CLI
+# ---------------------------
+def main():
+    parser = argparse.ArgumentParser(description="DevBox – Générateur d'environnements de dev prêts à l’emploi")
+    parser.add_argument("--stack", type=str, default="nextjs-node-mongodb", help="Stack choisie (ex: nextjs-node-mongodb)")
+    parser.add_argument("--output", type=str, default="DevProject", help="Répertoire de sortie pour le projet généré")
+    parser.add_argument("--plugins", type=str, default="", help="Plugins supplémentaires séparés par des virgules (ex: stripe,supabase)")
+    
+    args = parser.parse_args()
+    
+    plugins = args.plugins.split(",") if args.plugins.strip() else []
+    generate_devbox(args.stack, args.output, plugins)
+
+if __name__ == "__main__":
+    main()
